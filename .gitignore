@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 编译产物（二进制文件单独管理）
+# 如果想把 .dll/.so 也 commit 进来，注释掉下面两行
+# pydsview/*.dll
+# pydsview/*.so
+
+# DSView 完整源码太大，只保留 libsigrok4DSL 核心部分
+dsview_src/DSView/
+dsview_src/libsigrokdecode4DSL/
+dsview_src/build*/
