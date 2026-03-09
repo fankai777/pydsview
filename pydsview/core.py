@@ -15,15 +15,19 @@ DSLogicDevice —— 用 Python 控制 DSLogic 逻辑分析仪
 """
 
 import ctypes
+import ctypes.util
+import csv
 import os
+import struct
 import threading
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from .constants import (
     SR_OK,
     SR_CONF_SAMPLERATE,
     SR_CONF_LIMIT_SAMPLES,
     SR_CONF_OPERATION_MODE,
+    SR_CONF_VTH,
     SR_DF_LOGIC, SR_DF_END,
     DS_EV_COLLECT_TASK_END,
     DS_EV_COLLECT_TASK_END_BY_ERROR,
@@ -174,6 +178,62 @@ class DSLogicDevice:
         """设置工作模式：LO_OP_BUFFER（默认）或 LO_OP_STREAM"""
         self._config_set_uint64(SR_CONF_OPERATION_MODE, mode)
 
+    def enable_channel(self, index: int, enable: bool = True):
+        """
+        启用或禁用指定通道。
+
+        Parameters
+        ----------
+        index : int
+            通道索引，从 0 开始（CH0=0, CH1=1, ...）
+        enable : bool
+            True 启用，False 禁用
+        """
+        self._ensure_device()
+        self._lib.ds_enable_device_channel_index.argtypes = [
+            ctypes.c_int, ctypes.c_int
+        ]
+        self._lib.ds_enable_device_channel_index.restype = ctypes.c_int
+        ret = self._lib.ds_enable_device_channel_index(index, int(enable))
+        if ret != SR_OK:
+            raise DeviceError(
+                f"ds_enable_device_channel_index({index}, {enable}) 失败", ret
+            )
+
+    def enable_channels(self, channels: List[int], total: int = 8):
+        """
+        批量设置通道启用状态。未在列表中的通道会被禁用。
+
+        Parameters
+        ----------
+        channels : list of int
+            要启用的通道索引列表，例如 [0, 1, 2, 3]
+        total : int
+            设备总通道数，默认 8（DSLogic 基础版）
+        """
+        for i in range(total):
+            self.enable_channel(i, i in channels)
+
+    def set_voltage_threshold(self, voltage: float):
+        """
+        设置逻辑电平判断阈值电压。
+
+        Parameters
+        ----------
+        voltage : float
+            阈值电压，单位 V。常用值：
+            - 1.8V 系统 → 0.9
+            - 3.3V 系统 → 1.65（默认）
+            - 5V 系统   → 2.5
+        """
+        self._ensure_device()
+        gvar = self._gvariant_double(voltage)
+        ret = self._lib.ds_set_actived_device_config(None, None, SR_CONF_VTH, gvar)
+        if ret != SR_OK:
+            raise DeviceError(
+                f"set_voltage_threshold({voltage}V) 失败，错误码 {ret}"
+            )
+
     # ──────────────────────────────────────────────
     #  采集
     # ──────────────────────────────────────────────
@@ -263,6 +323,118 @@ class DSLogicDevice:
             self._lib.ds_stop_collect()
 
     # ──────────────────────────────────────────────
+    #  导出文件
+    # ──────────────────────────────────────────────
+
+    def export_csv(self, data: bytes, path: str,
+                   channels: List[int] = None, samplerate: int = None):
+        """
+        将采集数据导出为 CSV 文件。
+
+        Parameters
+        ----------
+        data : bytes
+            capture() 返回的原始数据
+        path : str
+            输出文件路径，例如 "capture.csv"
+        channels : list of int, optional
+            要导出的通道列表，默认导出全部 8 个通道
+        samplerate : int, optional
+            采样率（Hz），用于计算时间戳列；不传则只输出序号
+
+        CSV 格式：
+            index, time_us(可选), CH0, CH1, CH2, ...
+        """
+        if channels is None:
+            channels = list(range(8))
+
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+
+            # 表头
+            header = ["index"]
+            if samplerate:
+                header.append("time_us")
+            header += [f"CH{ch}" for ch in channels]
+            writer.writerow(header)
+
+            # 数据行
+            for i, byte in enumerate(data):
+                row = [i]
+                if samplerate:
+                    row.append(f"{i / samplerate * 1e6:.3f}")
+                row += [1 if (byte >> ch) & 1 else 0 for ch in channels]
+                writer.writerow(row)
+
+    def export_vcd(self, data: bytes, path: str,
+                   channels: List[int] = None, samplerate: int = 10_000_000):
+        """
+        将采集数据导出为 VCD（Value Change Dump）文件。
+        VCD 是标准波形格式，可用 GTKWave 等工具打开。
+
+        Parameters
+        ----------
+        data : bytes
+            capture() 返回的原始数据
+        path : str
+            输出文件路径，例如 "capture.vcd"
+        channels : list of int, optional
+            要导出的通道列表，默认全部 8 个
+        samplerate : int
+            采样率（Hz），默认 10 MHz
+        """
+        if channels is None:
+            channels = list(range(8))
+
+        # VCD 时间单位：1ns（1GHz base），timescale 根据采样率计算
+        period_ns = int(1e9 / samplerate)
+
+        with open(path, "w") as f:
+            # 文件头
+            f.write("$timescale 1ns $end\n")
+            f.write("$scope module DSLogic $end\n")
+            for ch in channels:
+                f.write(f"$var wire 1 {chr(ord('!') + ch)} CH{ch} $end\n")
+            f.write("$upscope $end\n")
+            f.write("$enddefinitions $end\n")
+            f.write("#0\n")
+            f.write("$dumpvars\n")
+
+            # 初始状态
+            if data:
+                first = data[0]
+                for ch in channels:
+                    val = (first >> ch) & 1
+                    f.write(f"{val}{chr(ord('!') + ch)}\n")
+            f.write("$end\n")
+
+            # 只写发生变化的时刻（节省文件大小）
+            prev = data[0] if data else 0
+            for i, byte in enumerate(data):
+                changed = byte ^ prev
+                if changed or i == 0:
+                    f.write(f"#{i * period_ns}\n")
+                    for ch in channels:
+                        if (changed >> ch) & 1:
+                            val = (byte >> ch) & 1
+                            f.write(f"{val}{chr(ord('!') + ch)}\n")
+                    prev = byte
+
+    def export_binary(self, data: bytes, path: str):
+        """
+        直接将原始采集数据写入二进制文件。
+
+        Parameters
+        ----------
+        data : bytes
+            capture() 返回的原始数据
+        path : str
+            输出文件路径
+        """
+        with open(path, "wb") as f:
+            f.write(data)
+
+    # ──────────────────────────────────────────────
     #  内部方法
     # ──────────────────────────────────────────────
 
@@ -308,6 +480,19 @@ class DSLogicDevice:
             return self._lib.g_variant_new_uint64(ctypes.c_uint64(value))
         except AttributeError:
             return self._get_glib().g_variant_new_uint64(ctypes.c_uint64(value))
+
+    def _gvariant_double(self, value: float) -> ctypes.c_void_p:
+        """创建 GVariant double（用于 VTH 等 float 类型配置）"""
+        try:
+            fn = self._lib.g_variant_new_double
+            fn.argtypes = [ctypes.c_double]
+            fn.restype = ctypes.c_void_p
+            return fn(ctypes.c_double(value))
+        except AttributeError:
+            glib = self._get_glib()
+            glib.g_variant_new_double.argtypes = [ctypes.c_double]
+            glib.g_variant_new_double.restype = ctypes.c_void_p
+            return glib.g_variant_new_double(ctypes.c_double(value))
 
     def _get_glib(self):
         if self._glib is None:

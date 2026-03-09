@@ -183,6 +183,18 @@ def _bind_functions(lib: ctypes.CDLL):
     lib.ds_get_actived_device_mode.argtypes = []
     lib.ds_get_actived_device_mode.restype  = ctypes.c_int
 
+    # int ds_enable_device_channel_index(int ch_index, gboolean enable)
+    lib.ds_enable_device_channel_index.argtypes = [ctypes.c_int, ctypes.c_int]
+    lib.ds_enable_device_channel_index.restype  = ctypes.c_int
+
+    # int ds_set_device_channel_name(int ch_index, const char *name)
+    lib.ds_set_device_channel_name.argtypes = [ctypes.c_int, ctypes.c_char_p]
+    lib.ds_set_device_channel_name.restype  = ctypes.c_int
+
+    # int ds_get_actived_device_status(struct sr_status *status, gboolean prg)
+    lib.ds_get_actived_device_status.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.ds_get_actived_device_status.restype  = ctypes.c_int
+
     # GVariant helpers（glib，可能不在同一库）
     try:
         lib.g_variant_new_uint64.argtypes = [ctypes.c_uint64]
