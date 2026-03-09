@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "pydsview"
+version = "0.1.0"
+description = "Python bindings for DSLogic logic analyzer via libsigrok4DSL"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "GPL-3.0-or-later"}
+keywords = ["dslogic", "dsview", "logic-analyzer", "sigrok"]
+
+[project.optional-dependencies]
+dev = ["pytest", "numpy"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pydsview*"]
