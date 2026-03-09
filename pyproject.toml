@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydsview"
-version = "0.1.0"
+version = "0.0.1"
 description = "Python library to control DSLogic logic analyzers via libsigrok4DSL"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "GPL-3.0-or-later"}
+license = "GPL-3.0-or-later"
 keywords = ["dslogic", "dsview", "logic-analyzer", "sigrok"]
 
 [project.optional-dependencies]

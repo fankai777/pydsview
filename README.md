@@ -2,16 +2,19 @@
 
 用 Python 控制 DSLogic 逻辑分析仪采集数据。
 
-## 架构
+**预编译二进制已内置，开箱即用，无需自行编译。**
 
+## 安装
+
+```bash
+pip install pydsview
 ```
-Python (pydsview)
-    │
-    ▼ ctypes
-libsigrok4DSL.so/.dll   ← DSView 内的 C 库（DreamSourceLab 魔改版 libsigrok）
-    │
-    ▼ libusb
-DSLogic 硬件
+
+或从源码安装：
+
+```bash
+git clone https://github.com/fankai777/pydsview.git
+pip install dist/pydsview-0.0.1-py3-none-any.whl
 ```
 
 ## 快速开始
@@ -20,129 +23,80 @@ DSLogic 硬件
 from pydsview import DSLogicDevice
 
 with DSLogicDevice() as dev:
-    dev.set_samplerate(10_000_000)   # 10 MHz
-    dev.set_sample_count(1_000_000)  # 1M 样本
-    data = dev.capture()             # 阻塞直到采完
+    # 通道配置（只用前4个通道）
+    dev.enable_channels([0, 1, 2, 3], total=8)
 
-# data 是 bytes，每个字节对应 8 个通道在同一时刻的电平
-# bit 0 = CH0, bit 1 = CH1, ...
-print(f"采集到 {len(data)} 字节")
-```
+    # 采样率 & 电压阈值（3.3V 系统）
+    dev.set_samplerate(10_000_000)       # 10 MHz
+    dev.set_voltage_threshold(1.65)      # 3.3V 系统用 1.65V
+    dev.set_sample_count(1_000_000)      # 1M 样本
 
-异步采集（流式）：
+    # 开始采集（同步阻塞）
+    data = dev.capture()
 
-```python
-def on_data(chunk: bytes):
-    print(f"收到 {len(chunk)} 字节")
+print(f"采集到 {len(data):,} 字节")
 
-with DSLogicDevice() as dev:
-    dev.set_samplerate(10_000_000)
-    dev.set_sample_count(1_000_000)
-    t = dev.async_capture(on_data)
-    t.join()
-```
-
-## 安装
-
-```bash
-pip install -e .
-```
-
-## 编译 libsigrok4DSL（必须先做这步）
-
-libsigrok4DSL 是 DSView 源码内的 C 库，需要从源码编译。
-
-### Windows（使用 WSL2）
-
-```bash
-# 1. 在 WSL2 中安装依赖
-sudo apt update
-sudo apt install -y cmake gcc g++ libglib2.0-dev libusb-1.0-0-dev \
-    libzip-dev pkg-config
-
-# 2. 克隆 DSView 源码
-git clone https://github.com/DreamSourceLab/DSView.git
-cd DSView
-
-# 3. 编译 libsigrok4DSL
-mkdir build && cd build
-cmake ../libsigrok4DSL -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-
-# 编译产物在 build/libsigrok4DSL.so
-```
-
-### Linux
-
-同上，不需要 WSL2，直接在终端运行。
-
-### 指定库路径
-
-将编译好的 `.so` 或 `.dll` 放到 `pydsview/` 目录下，或通过环境变量指定：
-
-```bash
-export LIBSIGROK4DSL_PATH=/path/to/libsigrok4DSL.so
-```
-
-或在代码中指定：
-
-```python
-from pydsview import DSLogicDevice
-dev = DSLogicDevice(lib_path="/path/to/libsigrok4DSL.so")
+# 导出文件
+dev.export_csv(data, "capture.csv", channels=[0,1,2,3], samplerate=10_000_000)
+dev.export_vcd(data, "capture.vcd", channels=[0,1,2,3], samplerate=10_000_000)
 ```
 
 ## Windows 驱动安装
 
-DSLogic 在 Windows 上需要 WinUSB 或 libusb-win32 驱动。  
-推荐用 [Zadig](https://zadig.akeo.ie/) 安装 WinUSB 驱动：
+DSLogic 在 Windows 上需要 WinUSB 驱动，用 [Zadig](https://zadig.akeo.ie/) 安装：
 
 1. 打开 Zadig → Options → List All Devices
 2. 选择 "DSLogic"
 3. 选择 WinUSB → Install Driver
 
+## 完整 API
+
+| 方法 | 说明 |
+|------|------|
+| `enable_channel(index, enable)` | 启用/禁用单个通道 |
+| `enable_channels([0,1,2,3])` | 批量设置通道 |
+| `set_samplerate(hz)` | 采样率，如 `10_000_000` |
+| `set_voltage_threshold(v)` | 逻辑电平阈值（V） |
+| `set_sample_count(n)` | 采集样本数 |
+| `capture()` | 同步采集，返回 `bytes` |
+| `async_capture(on_data, on_done)` | 异步流式采集 |
+| `stop()` | 停止采集 |
+| `export_csv(data, path, ...)` | 导出 CSV（含时间戳） |
+| `export_vcd(data, path, ...)` | 导出 VCD（GTKWave 可打开） |
+| `export_binary(data, path)` | 导出原始二进制 |
+
 ## 数据格式
 
-`capture()` 返回 `bytes`，每个字节代表所有通道在某一采样时刻的电平：
+`capture()` 返回 `bytes`，每字节是 8 个通道的电平快照：
 
 ```
-Byte N = 通道状态快照
-  bit 0 → CH0
-  bit 1 → CH1
-  ...
-  bit 7 → CH7
+bit 0 = CH0, bit 1 = CH1, ... bit 7 = CH7
 ```
 
-如果启用了 32 通道模式，unitsize=4（每个样本 4 字节），此时：
-
-```python
-import struct
-samples = [struct.unpack_from('<I', data, i)[0] for i in range(0, len(data), 4)]
-```
-
-## 项目结构
+## 架构
 
 ```
-pydsview/
-├── __init__.py      # 对外 API
-├── core.py          # DSLogicDevice 主类
-├── lib.py           # ctypes 加载 libsigrok4DSL
-├── structs.py       # C 结构体（ctypes.Structure）
-├── constants.py     # SR_CONF_* / SR_DF_* 常量
-└── exceptions.py    # 自定义异常
-examples/
-└── basic_capture.py # 基础采集示例
+Python (pydsview)
+    │
+    ▼ ctypes
+libsigrok4DSL.so/.dll   ← DreamSourceLab 魔改版 libsigrok（已内置）
+    │
+    ▼ libusb
+DSLogic 硬件
 ```
+
+预编译二进制基于 [DreamSourceLab/DSView](https://github.com/DreamSourceLab/DSView) 源码编译。
+详见 [BINARIES.md](BINARIES.md)。
 
 ## 当前状态
 
-- [x] 库框架、常量、结构体定义
-- [x] ctypes 函数签名绑定
-- [x] DSLogicDevice 设备控制类
-- [x] 同步采集（capture）
-- [x] 异步采集（async_capture）
-- [ ] 实机测试（需要编译好 libsigrok4DSL）
-- [ ] 触发配置 API
-- [ ] 多设备支持
+- [x] 预编译 libsigrok4DSL（Linux x86_64 + Windows x86_64）
+- [x] 通道启用/禁用
+- [x] 采样率、电压阈值、样本数配置
+- [x] 同步 / 异步采集
+- [x] CSV / VCD / Binary 导出
+- [ ] 实机测试（进行中）
+- [ ] 触发配置
 - [ ] numpy 数组输出
 
 ## License
