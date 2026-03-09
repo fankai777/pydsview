@@ -107,6 +107,18 @@ SR_CONF_THRESHOLD       = 30071
 SR_CONF_VTH             = 30072
 SR_CONF_PROBE_EN        = 30080
 
+# ─── DS 事件类型（libsigrok_event_type）────────────────
+DS_EV_NEW_DEVICE_ATTACH             = 1
+DS_EV_CURRENT_DEVICE_DETACH         = 2
+DS_EV_INACTIVE_DEVICE_DETACH        = 3
+DS_EV_COLLECT_TASK_START            = 101
+DS_EV_COLLECT_TASK_END              = 102
+DS_EV_DEVICE_RUNNING                = 103
+DS_EV_DEVICE_STOPPED                = 104
+DS_EV_COLLECT_TASK_END_BY_DETACHED  = 105
+DS_EV_COLLECT_TASK_END_BY_ERROR     = 106
+DS_EV_DEVICE_SPEED_NOT_MATCH        = 107
+
 # 采集限制
 SR_CONF_LIMIT_MSEC      = 50000  # 时间限制（ms）
 SR_CONF_LIMIT_SAMPLES   = 50001  # 样本数限制
