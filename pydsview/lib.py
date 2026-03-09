@@ -22,6 +22,15 @@ from .structs import SrDatafeedPacket, DsDatafeedCallback, DsEventCallback
 
 _lib = None  # 全局库句柄
 
+# Windows: 在 import 时把 pydsview 包目录加入 DLL 搜索路径
+# 这样 libglib-2.0-0.dll 等运行时依赖才能被找到
+import sys as _sys
+if _sys.platform == "win32":
+    import os as _os
+    _pkg_dir = str(Path(__file__).parent)
+    if hasattr(_os, "add_dll_directory"):  # Python 3.8+
+        _os.add_dll_directory(_pkg_dir)
+
 
 def _candidate_paths():
     candidates = []

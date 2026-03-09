@@ -1,11 +1,11 @@
 [build-system]
 requires = ["setuptools>=61"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydsview"
 version = "0.1.0"
-description = "Python bindings for DSLogic logic analyzer via libsigrok4DSL"
+description = "Python library to control DSLogic logic analyzers via libsigrok4DSL"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "GPL-3.0-or-later"}
@@ -17,3 +17,11 @@ dev = ["pytest", "numpy"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pydsview*"]
+
+# 把 .so / .dll 及其依赖一起打包进去
+[tool.setuptools.package-data]
+pydsview = [
+    "*.so",
+    "*.so.*",
+    "*.dll",
+]
