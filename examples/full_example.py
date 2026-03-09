@@ -1,10 +1,12 @@
 """
 full_example.py —— 完整功能示例
 
-展示：通道选择、采样率、电压阈值、开始/停止、导出文件
+包含两种采集模式：
+  1. 手动停止模式（推荐）：start() → 等待 → stop_and_get()
+  2. 固定样本数模式：set_sample_count() → capture()
 """
 
-import sys, os
+import sys, os, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pydsview import DSLogicDevice, LibraryNotFoundError, DeviceNotFoundError
@@ -15,46 +17,42 @@ def main():
         with DSLogicDevice() as dev:
 
             # ── 1. 通道配置 ──────────────────────────
-            # 只启用 CH0~CH3，禁用其余通道
             dev.enable_channels([0, 1, 2, 3], total=8)
-            print("通道：CH0~CH3 已启用")
 
-            # ── 2. 采样率 ────────────────────────────
-            samplerate = 10_000_000  # 10 MHz
+            # ── 2. 采样率 & 电压阈值 ─────────────────
+            samplerate = 10_000_000          # 10 MHz
             dev.set_samplerate(samplerate)
-            print(f"采样率：{samplerate / 1e6:.0f} MHz")
+            dev.set_voltage_threshold(1.65)  # 3.3V 系统
 
-            # ── 3. 电压阈值 ──────────────────────────
-            # 3.3V 系统用 1.65V，1.8V 系统用 0.9V
-            dev.set_voltage_threshold(1.65)
-            print("电压阈值：1.65V（适合 3.3V 系统）")
+            # ════════════════════════════════════════
+            # 模式 A：手动停止（推荐）
+            # ════════════════════════════════════════
+            print("开始采集（手动停止模式）...")
+            dev.start()
 
-            # ── 4. 采样数量 ──────────────────────────
-            sample_count = 1_000_000  # 1M 样本
-            dev.set_sample_count(sample_count)
-            print(f"采样数：{sample_count:,}")
+            # 这里可以做任何事：等待按键、等待信号、固定时长...
+            time.sleep(1)   # 采集 1 秒
 
-            # ── 5. 开始采集（同步阻塞） ──────────────
-            print("开始采集...")
-            data = dev.capture()
-            print(f"采集完成，共 {len(data):,} 字节")
+            data = dev.stop_and_get()
+            print(f"采集完成，共 {len(data):,} 字节 "
+                  f"({len(data) / samplerate * 1000:.1f} ms)")
 
-            # ── 6. 导出文件 ──────────────────────────
-            # CSV（带时间戳，只导出 CH0~CH3）
+            # ════════════════════════════════════════
+            # 模式 B：固定样本数（自动停止）
+            # ════════════════════════════════════════
+            # dev.set_sample_count(1_000_000)
+            # data = dev.capture()
+
+            # ── 3. 导出文件 ──────────────────────────
             dev.export_csv(data, "capture.csv",
                            channels=[0, 1, 2, 3],
                            samplerate=samplerate)
             print("已导出：capture.csv")
 
-            # VCD（可用 GTKWave 打开）
             dev.export_vcd(data, "capture.vcd",
                            channels=[0, 1, 2, 3],
                            samplerate=samplerate)
             print("已导出：capture.vcd")
-
-            # 原始二进制
-            dev.export_binary(data, "capture.bin")
-            print("已导出：capture.bin")
 
     except LibraryNotFoundError as e:
         print(f"[错误] 找不到库：{e}")

@@ -3,14 +3,27 @@ DSLogicDevice —— 用 Python 控制 DSLogic 逻辑分析仪
 
 使用 DreamSourceLab 的 ds_* 高层 API（lib_main.c）。
 
-典型用法：
+典型用法（手动停止模式，推荐）：
 
+    import time
     from pydsview import DSLogicDevice
 
     with DSLogicDevice() as dev:
         dev.set_samplerate(10_000_000)   # 10 MHz
-        dev.set_sample_count(1_000_000)  # 1M 样本
-        data = dev.capture()             # bytes，每字节8通道
+        dev.set_voltage_threshold(1.65)  # 3.3V 系统
+        dev.start()                      # 开始采集，不阻塞
+
+        time.sleep(2)                    # 采集 2 秒（或等待你的触发条件）
+
+        data = dev.stop_and_get()        # 停止 + 返回全部数据（bytes）
+        print(f"采集到 {len(data):,} 字节")
+
+典型用法（固定样本数，自动停止）：
+
+    with DSLogicDevice() as dev:
+        dev.set_samplerate(10_000_000)
+        dev.set_sample_count(1_000_000)  # 1M 样本后自动停
+        data = dev.capture()             # 阻塞直到采完
 
 """
 
@@ -317,8 +330,52 @@ class DSLogicDevice:
         if ret != SR_OK:
             raise CaptureError(f"ds_start_collect() 失败，错误码 {ret}")
 
+    def start(self):
+        """
+        开始采集，**不阻塞**。数据在后台持续积累。
+        调用 stop_and_get() 停止并取回所有数据。
+
+        适合"手动控制采集时长"的场景：
+            dev.start()
+            time.sleep(2)          # 或等待某个条件
+            data = dev.stop_and_get()
+        """
+        self._ensure_device()
+        self._capture_data = []
+        self._capture_done.clear()
+        self._capture_error = None
+
+        self._datafeed_cb = DsDatafeedCallback(self._on_datafeed)
+        self._lib.ds_set_datafeed_callback(self._datafeed_cb)
+
+        self._event_cb = DsEventCallback(self._on_event)
+        self._lib.ds_set_event_callback(self._event_cb)
+
+        ret = self._lib.ds_start_collect()
+        if ret != SR_OK:
+            raise CaptureError(f"ds_start_collect() 失败，错误码 {ret}")
+
+    def stop_and_get(self) -> bytes:
+        """
+        停止采集并返回从 start() 开始积累的所有数据。
+
+        Returns
+        -------
+        bytes
+            所有 SR_DF_LOGIC 包拼接的原始数据。
+            每字节 = 8 通道在同一时刻的电平（bit0=CH0 ... bit7=CH7）
+        """
+        self._lib.ds_stop_collect()
+        # 等待库回调通知采集真正结束（最多 3 秒）
+        self._capture_done.wait(timeout=3.0)
+
+        if self._capture_error:
+            raise self._capture_error
+
+        return b"".join(self._capture_data)
+
     def stop(self):
-        """停止正在进行的采集"""
+        """停止正在进行的采集（不返回数据，用 stop_and_get() 代替）"""
         if self._initialized:
             self._lib.ds_stop_collect()
 
