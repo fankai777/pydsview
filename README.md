@@ -1,5 +1,8 @@
 # pydsview
 
+[![PyPI version](https://img.shields.io/pypi/v/pydsview)](https://pypi.org/project/pydsview/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 [English](#english) | [中文](#中文)
 
 ---
@@ -9,6 +12,12 @@
 ## English
 
 Python bindings for [DSView](https://github.com/DreamSourceLab/DSView)'s `libsigrok4DSL` — control DreamSourceLab logic analyzers and oscilloscopes (DSLogic, DSCope) from Python.
+
+### Installation
+
+```bash
+pip install pydsview
+```
 
 ### Features
 
@@ -39,6 +48,13 @@ Python user code
 Prebuilt DLLs and firmware are bundled. Just install and use:
 
 ```bash
+pip install pydsview
+```
+
+For development:
+
+```bash
+git clone https://github.com/fankai777/pydsview.git
 cd pydsview
 pip install -e ".[dev]"
 ```
@@ -164,6 +180,12 @@ GPL-3.0-or-later (same as DSView). Bundled firmware files are from [DreamSourceL
 
 [DSView](https://github.com/DreamSourceLab/DSView) `libsigrok4DSL` 的 Python 绑定 — 用 Python 控制 DreamSourceLab 逻辑分析仪和示波器（DSLogic、DSCope），无需 Qt GUI。
 
+### 安装
+
+```bash
+pip install pydsview
+```
+
 ### 功能
 
 - 发现并激活 DSLogic/DSCope/Demo 设备
@@ -190,9 +212,16 @@ Python 用户代码
 
 ### 快速开始（Windows）
 
-预编译 DLL 和固件已打包在仓库中，直接安装即可使用：
+预编译 DLL 和固件已打包，直接安装即可使用：
 
 ```bash
+pip install pydsview
+```
+
+开发模式：
+
+```bash
+git clone https://github.com/fankai777/pydsview.git
 cd pydsview
 pip install -e ".[dev]"
 ```
