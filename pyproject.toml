@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pydsview"
+version = "0.1.0"
+description = "Python bindings for DSView's libsigrok4DSL — control DreamSourceLab logic analyzers and oscilloscopes"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.9"
+authors = [
+    { name = "wanzi" },
+]
+keywords = ["logic-analyzer", "oscilloscope", "DSView", "DSLogic", "DSCope", "sigrok"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Hardware",
+]
+dependencies = [
+    "cffi>=1.15",
+    "numpy>=1.20",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.5"]
+dev = ["pytest>=7.0", "matplotlib>=3.5"]
+
+[tool.setuptools.packages.find]
+include = ["pydsview*"]
+
+[tool.setuptools.package-data]
+pydsview = ["_libs/*.dll", "_libs/*.so", "_libs/*.dylib"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
