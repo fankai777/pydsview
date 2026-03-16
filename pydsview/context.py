@@ -77,6 +77,9 @@ class DSContext:
 
         with _lib_lock:
             if not _lib_initialized:
+                if not firmware_dir:
+                    # Default to bundled res/ directory
+                    firmware_dir = os.path.join(os.path.dirname(__file__), "res")
                 if firmware_dir:
                     lib.ds_set_firmware_resource_dir(firmware_dir.encode())
                 if user_data_dir:

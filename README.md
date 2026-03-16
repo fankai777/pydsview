@@ -57,7 +57,7 @@ pip install -e ".[dev]"
 ```python
 import pydsview
 
-with pydsview.DSContext(firmware_dir="/path/to/DSView/res") as ctx:
+with pydsview.DSContext() as ctx:
     # List devices
     for info in ctx.list_devices():
         print(info.name, info.handle)
@@ -85,7 +85,7 @@ with pydsview.DSContext(firmware_dir="/path/to/DSView/res") as ctx:
 
 ### `DSContext(firmware_dir=None, user_data_dir=None)`
 
-Initialize the library. Use as a context manager.
+Initialize the library. Use as a context manager. Firmware files are bundled in `pydsview/res/` and loaded automatically — no need to specify `firmware_dir` unless you want to override.
 
 - `list_devices()` → `list[DeviceInfo]`
 - `get_device(index)` → `Device`

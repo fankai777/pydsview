@@ -4,9 +4,5 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-*.so
-*.dll
-*.dylib
 .pytest_cache/
 csrc/build/
-pydsview/_libs/
