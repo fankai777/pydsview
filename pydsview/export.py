@@ -64,7 +64,7 @@ class Exporter:
                 header = []
                 if time_column:
                     header.append("Time(s)")
-                header.extend(f"CH{ch}" for ch in channels)
+                header.extend(str(ch) for ch in channels)
                 writer.writerow(header)
 
                 prev = None
