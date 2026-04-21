@@ -47,17 +47,23 @@ class Exporter:
             return
 
         if result.mode == DeviceMode.LOGIC:
-            # Determine which channels to export
+            # Decode per-channel arrays (ordered by enabled-channel list).
+            ch_arrays = result.to_channel_arrays()
+            if not ch_arrays:
+                with open(path, "w") as f:
+                    f.write("")
+                return
+
+            # Map channel index -> bool array. If channel_indices isn't
+            # populated (older result), fall back to 0..N-1 ordering.
+            enabled_indices = result.channel_indices or list(range(len(ch_arrays)))
+            ch_map = {idx: arr for idx, arr in zip(enabled_indices, ch_arrays)}
+
             if channels is None:
-                max_bits = result.unitsize * 8 if result.unitsize else 1
-                channels = list(range(max_bits))
+                channels = list(enabled_indices)
 
+            n_samples = len(ch_arrays[0]) if ch_arrays else 0
             period = 1.0 / result.samplerate if result.samplerate else 0.0
-
-            # Build a mask covering only the exported channel bits
-            mask = np.uint64(0)
-            for ch in channels:
-                mask |= np.uint64(1) << np.uint64(ch)
 
             with open(path, "w", newline="") as f:
                 writer = csv.writer(f)
@@ -68,16 +74,16 @@ class Exporter:
                 writer.writerow(header)
 
                 prev = None
-                for i in range(len(raw)):
-                    cur = int(raw[i]) & int(mask)
-                    if compressed and prev is not None and cur == prev:
+                for i in range(n_samples):
+                    values = [int(ch_map[c][i]) if c in ch_map else 0
+                              for c in channels]
+                    if compressed and prev is not None and values == prev:
                         continue
-                    prev = cur
+                    prev = values
                     row = []
                     if time_column:
                         row.append(f"{i * period:.15g}")
-                    for ch in channels:
-                        row.append(int((raw[i] >> ch) & 1))
+                    row.extend(values)
                     writer.writerow(row)
 
         elif result.mode in (DeviceMode.DSO, DeviceMode.ANALOG):
@@ -119,15 +125,19 @@ class Exporter:
         if result.mode != DeviceMode.LOGIC:
             raise ValueError("VCD export only supports LOGIC mode")
 
-        raw = result.to_numpy()
-        if raw.size == 0:
+        ch_arrays = result.to_channel_arrays()
+        if not ch_arrays:
             with open(path, "w") as f:
                 f.write("")
             return
 
+        enabled_indices = result.channel_indices or list(range(len(ch_arrays)))
+        ch_map = {idx: arr for idx, arr in zip(enabled_indices, ch_arrays)}
+
         if channels is None:
-            max_bits = result.unitsize * 8 if result.unitsize else 1
-            channels = list(range(max_bits))
+            channels = list(enabled_indices)
+
+        n_samples = len(ch_arrays[0])
 
         # VCD uses single-character identifiers: '!', '"', '#', ...
         id_chars = [chr(33 + i) for i in range(len(channels))]
@@ -150,6 +160,10 @@ class Exporter:
         else:
             time_mult = 1.0
 
+        def sample_value(ch_idx: int, i: int) -> int:
+            arr = ch_map.get(ch_idx)
+            return int(arr[i]) if arr is not None else 0
+
         with open(path, "w") as f:
             # Header
             f.write("$timescale {0} $end\n".format(timescale))
@@ -162,24 +176,21 @@ class Exporter:
             # Initial values
             f.write("#0\n")
             f.write("$dumpvars\n")
-            for idx, ch in enumerate(channels):
-                val = int((raw[0] >> ch) & 1)
+            prev = [sample_value(ch, 0) for ch in channels]
+            for idx, val in enumerate(prev):
                 f.write(f"{val}{id_chars[idx]}\n")
             f.write("$end\n")
 
             # Value changes
-            prev = raw[0]
-            for i in range(1, len(raw)):
-                cur = raw[i]
+            for i in range(1, n_samples):
+                cur = [sample_value(ch, i) for ch in channels]
                 if cur == prev:
                     continue
                 t = int(i * time_mult + 0.5)
                 f.write(f"#{t}\n")
-                diff = cur ^ prev
-                for idx, ch in enumerate(channels):
-                    if (diff >> ch) & 1:
-                        val = int((cur >> ch) & 1)
-                        f.write(f"{val}{id_chars[idx]}\n")
+                for idx, (p, c) in enumerate(zip(prev, cur)):
+                    if p != c:
+                        f.write(f"{c}{id_chars[idx]}\n")
                 prev = cur
 
     @staticmethod

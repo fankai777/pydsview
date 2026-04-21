@@ -55,6 +55,7 @@ class CaptureResult:
         self.unit_bits: int = 8
         self.unit_pitch: int = 1
         self.channel_count: int = 0
+        self.channel_indices: list[int] = []
         self.data_format: int = LogicFormat.CROSS_DATA
 
     def to_channel_arrays(self) -> list[np.ndarray]:
@@ -292,6 +293,7 @@ def run_capture(device, timeout: Optional[float] = None) -> CaptureResult:
     try:
         enabled = [ch for ch in device.channels if ch.enabled]
         state.result.channel_count = len(enabled)
+        state.result.channel_indices = [ch.index for ch in enabled]
     except Exception:
         pass
 
@@ -359,6 +361,7 @@ class CaptureSession:
         try:
             enabled = [ch for ch in self._device.channels if ch.enabled]
             state.result.channel_count = len(enabled)
+            state.result.channel_indices = [ch.index for ch in enabled]
         except Exception:
             pass
 

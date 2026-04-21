@@ -9,16 +9,10 @@ from ._constants import TriggerMode, Config
 from .errors import check_sr
 
 
-# Mapping from single-char trigger specs to (trigger0, trigger1) byte pairs.
-# These match the values expected by ds_trigger_probe_set().
-_TRIGGER_CHAR_MAP = {
-    "R": (0x01, 0x01),   # Rising edge
-    "F": (0x01, 0x00),   # Falling edge
-    "1": (0x00, 0x01),   # High
-    "0": (0x01, 0x00),   # Low
-    "X": (0x00, 0x00),   # Don't care
-    "C": (0x01, 0x01),   # Change (either edge)
-}
+# Valid single-char trigger specs. The driver (libsigrok4DSL/trigger.c) compares
+# the stored trigger0/trigger1 bytes against the ASCII characters themselves,
+# so we pass the character's byte value through unchanged — matching DSView GUI.
+_VALID_TRIGGER_SPECS = frozenset({"R", "F", "1", "0", "X", "C"})
 
 
 class TriggerConfig:
@@ -69,11 +63,12 @@ class TriggerConfig:
     def position(self) -> int:
         return lib.ds_trigger_get_pos()
 
-    def set_channel_trigger(self, channel: int, spec: str):
+    def set_channel_trigger(self, channel: int, spec: str, spec1: str = "X"):
         """
         Set the trigger condition for a single channel.
 
-        *spec* is one of:
+        *spec* (and optional *spec1* for stage-1 of advanced/serial triggers)
+        is one of:
 
         - ``'R'`` — Rising edge
         - ``'F'`` — Falling edge
@@ -81,12 +76,17 @@ class TriggerConfig:
         - ``'0'`` — Low level
         - ``'X'`` — Don't care
         - ``'C'`` — Any change (either edge)
+
+        For simple triggers, leave *spec1* at its default ``'X'`` — matches
+        DSView GUI behaviour.
         """
         spec = spec.upper()
-        if spec not in _TRIGGER_CHAR_MAP:
+        spec1 = spec1.upper()
+        if spec not in _VALID_TRIGGER_SPECS:
             raise ValueError(f"Unknown trigger spec '{spec}', use one of: R F 1 0 X C")
-        t0, t1 = _TRIGGER_CHAR_MAP[spec]
-        ret = lib.ds_trigger_probe_set(channel, t0, t1)
+        if spec1 not in _VALID_TRIGGER_SPECS:
+            raise ValueError(f"Unknown trigger spec1 '{spec1}', use one of: R F 1 0 X C")
+        ret = lib.ds_trigger_probe_set(channel, ord(spec), ord(spec1))
         check_sr(ret, f"ds_trigger_probe_set(ch={channel}) failed")
 
     def set_stages(self, count: int):
