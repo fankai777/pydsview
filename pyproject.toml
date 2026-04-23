@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydsview"
-version = "0.1.6"
+version = "0.1.7"
 description = "Python bindings for DSView's libsigrok4DSL — control DreamSourceLab logic analyzers and oscilloscopes"
 readme = "README.md"
 license = "GPL-3.0-or-later"

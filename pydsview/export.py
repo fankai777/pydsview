@@ -40,8 +40,8 @@ class Exporter:
                          channel value changed — matches DSView's "压缩数据" mode.
                          If False, write every sample ("原始数据" mode).
         """
-        raw = result.to_numpy()
-        if raw.size == 0:
+        raw_data = result.raw_data
+        if not raw_data:
             with open(path, "w") as f:
                 f.write("")
             return
@@ -72,6 +72,7 @@ class Exporter:
             )
 
         elif result.mode in (DeviceMode.DSO, DeviceMode.ANALOG):
+            raw = result.to_numpy()
             period = 1.0 / result.samplerate if result.samplerate else 0.0
 
             with open(path, "w", newline="") as f:
