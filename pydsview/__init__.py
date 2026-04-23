@@ -4,7 +4,7 @@ pydsview — Python bindings for DSView's libsigrok4DSL.
 Control DreamSourceLab logic analyzers and oscilloscopes from Python.
 """
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 from .context import DSContext, DeviceInfo
 from .device import Device

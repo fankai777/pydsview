@@ -62,29 +62,14 @@ class Exporter:
             if channels is None:
                 channels = list(enabled_indices)
 
-            n_samples = len(ch_arrays[0]) if ch_arrays else 0
-            period = 1.0 / result.samplerate if result.samplerate else 0.0
-
-            with open(path, "w", newline="") as f:
-                writer = csv.writer(f)
-                header = []
-                if time_column:
-                    header.append("Time(s)")
-                header.extend(str(ch) for ch in channels)
-                writer.writerow(header)
-
-                prev = None
-                for i in range(n_samples):
-                    values = [int(ch_map[c][i]) if c in ch_map else 0
-                              for c in channels]
-                    if compressed and prev is not None and values == prev:
-                        continue
-                    prev = values
-                    row = []
-                    if time_column:
-                        row.append(f"{i * period:.15g}")
-                    row.extend(values)
-                    writer.writerow(row)
+            Exporter.write_logic_csv(
+                path,
+                ch_map,
+                channels,
+                samplerate=result.samplerate,
+                time_column=time_column,
+                compressed=compressed,
+            )
 
         elif result.mode in (DeviceMode.DSO, DeviceMode.ANALOG):
             period = 1.0 / result.samplerate if result.samplerate else 0.0
@@ -103,6 +88,111 @@ class Exporter:
                         row.append(f"{i * period:.15g}")
                     row.append(int(val))
                     writer.writerow(row)
+
+    @staticmethod
+    def write_logic_csv(
+        path: str,
+        ch_map: dict,
+        channels: Sequence[int],
+        samplerate: int,
+        time_column: bool = True,
+        compressed: bool = True,
+    ):
+        """
+        Vectorized CSV writer for logic data given pre-decoded channel arrays.
+
+        Much faster than round-tripping through a :class:`CaptureResult` when
+        the caller already has per-channel arrays in hand (e.g. worker threads
+        doing their own decoding). Same output format as :meth:`to_csv`.
+
+        Parameters:
+            path:        Output file path.
+            ch_map:      ``{channel_index: np.ndarray}`` — bool or 0/1 uint8,
+                         one entry per channel. All arrays must have equal
+                         length. Missing channels (listed in ``channels`` but
+                         absent here) are emitted as zeros.
+            channels:    Channel indices to emit, in column order.
+            samplerate:  Samples per second, used for the ``Time(s)`` column.
+            time_column: If True, prepend a ``Time(s)`` column.
+            compressed:  If True, only emit rows where at least one channel
+                         differs from the previous emitted row.
+        """
+        n_ch = len(channels)
+        n_samples = 0
+        for c in channels:
+            arr = ch_map.get(c)
+            if arr is not None:
+                n_samples = len(arr)
+                break
+
+        header_parts = []
+        if time_column:
+            header_parts.append("Time(s)")
+        header_parts.extend(str(c) for c in channels)
+        header_bytes = (",".join(header_parts) + "\n").encode("ascii")
+
+        if n_ch == 0 or n_samples == 0:
+            with open(path, "wb") as f:
+                f.write(header_bytes)
+            return
+
+        period = 1.0 / samplerate if samplerate else 0.0
+
+        # Stack channels into a contiguous (n_samples, n_ch) uint8 buffer.
+        # bool and uint8 are both 1 byte so the assignment is effectively a
+        # memcpy; no per-sample Python work.
+        data = np.empty((n_samples, n_ch), dtype=np.uint8)
+        for i, c in enumerate(channels):
+            arr = ch_map.get(c)
+            if arr is None:
+                data[:, i] = 0
+            else:
+                data[:, i] = arr
+
+        # Change-row detection — one C-level pass over the whole buffer.
+        if compressed and n_samples > 1:
+            changed = np.any(data[1:] != data[:-1], axis=1)
+            keep_idx = np.empty(int(changed.sum()) + 1, dtype=np.int64)
+            keep_idx[0] = 0
+            keep_idx[1:] = np.nonzero(changed)[0] + 1
+        else:
+            keep_idx = np.arange(n_samples, dtype=np.int64)
+
+        kept = data[keep_idx]
+        n_kept = kept.shape[0]
+
+        # Build each output row's channel segment directly in bytes:
+        # [ch0, ',', ch1, ',', ..., chN]  (n_ch chars + n_ch-1 commas)
+        row_width = 2 * n_ch - 1
+        row_bytes = np.empty((n_kept, row_width), dtype=np.uint8)
+        row_bytes[:, 0::2] = kept + 48          # '0' = 0x30, '1' = 0x31
+        if n_ch > 1:
+            row_bytes[:, 1::2] = 44             # ','
+
+        with open(path, "wb") as f:
+            f.write(header_bytes)
+
+            if time_column:
+                # Per-row Python loop for %.15g float formatting. Buffered in
+                # 1 MB chunks so we don't hold the entire output in memory
+                # when the signal doesn't compress well.
+                FLUSH = 1 << 20
+                buf = bytearray()
+                for i in range(n_kept):
+                    t = int(keep_idx[i]) * period
+                    buf += f"{t:.15g},".encode("ascii")
+                    buf += row_bytes[i].tobytes()
+                    buf.append(10)              # '\n'
+                    if len(buf) >= FLUSH:
+                        f.write(buf)
+                        buf = bytearray()
+                if buf:
+                    f.write(buf)
+            else:
+                # Fully vectorized: append a newline column and write in one go.
+                nl_col = np.full((n_kept, 1), 10, dtype=np.uint8)
+                out = np.hstack([row_bytes, nl_col])
+                f.write(out.tobytes())
 
     @staticmethod
     def to_vcd(

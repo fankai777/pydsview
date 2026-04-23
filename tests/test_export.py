@@ -58,9 +58,7 @@ class TestCSVExport:
             with open(path) as f:
                 lines = f.readlines()
             assert len(lines) == 129  # header + 128 data rows (2 groups * 64)
-            assert "Time(s)" in lines[0]
-            assert "CH0" in lines[0]
-            assert "CH1" in lines[0]
+            assert lines[0].strip() == "Time(s),0,1"
         finally:
             os.unlink(path)
 

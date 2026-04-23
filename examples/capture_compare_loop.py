@@ -22,7 +22,6 @@ capture. Queue depth is monitored; if it grows, the worker is falling behind.
 Stop with Ctrl+C — current capture finishes, queue drains, CSVs flush.
 """
 
-import csv
 import os
 import queue
 import signal
@@ -41,11 +40,11 @@ EVEN_GROUP      = [4, 6, 8, 10]
 ODD_GROUP       = [5, 7, 9, 11]
 SAMPLERATE      = pydsview.SR_MHZ(25)
 VTH             = 1.6
-DURATION_SEC    = 1
+DURATION_SEC    = 5
 TRIGGER_CHANNEL = 4
 TRIGGER_SPEC    = "F"
 TRIGGER_POS_PCT = 50
-TIMEOUT_SEC     = 30.0         # per-capture trigger timeout
+TIMEOUT_SEC     = 60.0         # per-capture trigger timeout
 MAX_CAPTURES    = 0            # 0 = forever (Ctrl+C to stop)
 OUTPUT_DIR      = "anomalies"
 # Channels are flagged as anomalous only if mismatched samples exceed this
@@ -72,19 +71,11 @@ def compare_group(ch_map, group, tolerance_frac):
 
 
 def write_anomaly_csv(path, ch_map, samplerate):
-    """Write compressed CSV (rows only where any value changed)."""
-    period = 1.0 / samplerate if samplerate else 0.0
-    n = len(ch_map[CHANNELS[0]])
-    with open(path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["Time(s)"] + [str(c) for c in CHANNELS])
-        prev = None
-        for i in range(n):
-            values = [int(ch_map[c][i]) for c in CHANNELS]
-            if prev is not None and values == prev:
-                continue
-            prev = values
-            w.writerow([f"{i * period:.15g}"] + values)
+    """Write compressed CSV using the vectorized Exporter writer."""
+    pydsview.export.Exporter.write_logic_csv(
+        path, ch_map, CHANNELS, samplerate,
+        time_column=True, compressed=True,
+    )
 
 
 def compare_worker(q, output_dir, stats):
@@ -121,7 +112,9 @@ def compare_worker(q, output_dir, stats):
 
         if not (even_diffs or odd_diffs):
             stats["ok"] += 1
-            print(f"  [worker] #{cap_id} OK ({elapsed:.2f}s)  [ok={stats['ok']} anom={stats['anom']}]")
+            raw_even = [(c, int((ch_map[EVEN_GROUP[0]] != ch_map[c]).sum())) for c in EVEN_GROUP[1:]]
+            raw_odd  = [(c, int((ch_map[ODD_GROUP[0]]  != ch_map[c]).sum())) for c in ODD_GROUP[1:]]
+            print(f"  [worker] #{cap_id} OK ({elapsed:.2f}s) even={raw_even} odd={raw_odd}  [ok={stats['ok']} anom={stats['anom']}]")
         else:
             stats["anom"] += 1
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
