@@ -131,6 +131,7 @@ class PydsviewMcpTools:
                     duration_ms=duration_ms,
                     channels=channels,
                     threshold_v=threshold_v,
+                    trigger=None,
                     require_bound=False,
                 )
                 return ok(device=active_device_item(selected))
@@ -151,9 +152,17 @@ class PydsviewMcpTools:
         overwrite: bool = False,
         timeout_s: Optional[float] = None,
         threshold_v: Optional[float] = None,
+        trigger_channel: Optional[int] = None,
+        trigger: Optional[str] = None,
+        trigger_position_percent: Optional[int] = None,
     ) -> dict[str, Any]:
         try:
             validate_capture_bounds(self.config, samples=samples, duration_ms=duration_ms)
+            trigger_request = _normalize_simple_trigger(
+                trigger_channel=trigger_channel,
+                trigger=trigger,
+                trigger_position_percent=trigger_position_percent,
+            )
             path = resolve_artifact_path(
                 self.config,
                 filename=filename,
@@ -173,9 +182,16 @@ class PydsviewMcpTools:
                         duration_ms=duration_ms,
                         channels=channels,
                         threshold_v=threshold_v,
+                        trigger=trigger_request,
                         require_bound=True,
                     )
-                    result = selected.capture(timeout=timeout_s or self.config.default_timeout_s)
+                    if trigger_request:
+                        result = self._run_triggered_capture(
+                            selected,
+                            timeout_s=timeout_s or self.config.default_timeout_s,
+                        )
+                    else:
+                        result = selected.capture(timeout=timeout_s or self.config.default_timeout_s)
                     self._export_result(result, path, output_format)
                     metadata_path = self._write_capture_metadata(
                         path,
@@ -188,11 +204,13 @@ class PydsviewMcpTools:
                             "output_format": output_format,
                             "threshold_v": threshold_v,
                             "timeout_s": timeout_s or self.config.default_timeout_s,
+                            "trigger": trigger_request,
                         },
                         started_at=started_at,
                         completed_at=time.time(),
                         selected_device=selected,
                         libsigrok4dsl_version=_safe_lib_version(context),
+                        capture_result=result,
                     )
                     return ok(artifact=artifact_item(path, metadata_path))
             finally:
@@ -213,9 +231,17 @@ class PydsviewMcpTools:
         channels: Optional[list[int]] = None,
         threshold_v: Optional[float] = None,
         timeout_s: Optional[float] = None,
+        trigger_channel: Optional[int] = None,
+        trigger: Optional[str] = None,
+        trigger_position_percent: Optional[int] = None,
     ) -> dict[str, Any]:
         try:
             validate_capture_bounds(self.config, samples=samples, duration_ms=duration_ms)
+            trigger_request = _normalize_simple_trigger(
+                trigger_channel=trigger_channel,
+                trigger=trigger,
+                trigger_position_percent=trigger_position_percent,
+            )
             self._ensure_no_active_capture()
             self.capture_lock.acquire()
             context = self.context_factory()
@@ -229,6 +255,7 @@ class PydsviewMcpTools:
                     duration_ms=duration_ms,
                     channels=channels,
                     threshold_v=threshold_v,
+                    trigger=trigger_request,
                     require_bound=True,
                 )
                 session = selected.start_capture()
@@ -241,6 +268,7 @@ class PydsviewMcpTools:
                     "channels": channels or [],
                     "threshold_v": threshold_v,
                     "timeout_s": timeout_s or self.config.default_timeout_s,
+                    "trigger": trigger_request,
                 }
                 self._active_capture = ActiveCapture(
                     session_id=session_id,
@@ -431,6 +459,9 @@ class PydsviewMcpTools:
                 overwrite=overwrite,
                 timeout_s=profile.get("timeout_s"),
                 threshold_v=profile.get("threshold_v"),
+                trigger_channel=profile.get("trigger_channel"),
+                trigger=profile.get("trigger"),
+                trigger_position_percent=profile.get("trigger_position_percent"),
             )
         except McpToolError as exc:
             return exc.to_dict()
@@ -468,12 +499,17 @@ class PydsviewMcpTools:
         duration_ms: Optional[int],
         channels: Optional[list[int]],
         threshold_v: Optional[float],
+        trigger: Optional[dict[str, Any]],
         require_bound: bool,
     ) -> None:
         if require_bound:
             validate_capture_bounds(self.config, samples=samples, duration_ms=duration_ms)
         elif samples is not None and duration_ms is not None:
             raise McpToolError("invalid_capture_bounds", "configure_device accepts samples or duration_ms, not both")
+        if trigger:
+            device.set_config(Config.OPERATION_MODE, 1)
+        if threshold_v is not None:
+            device.set_config(Config.VTH, float(threshold_v))
         if samplerate_hz is not None:
             if samplerate_hz <= 0:
                 raise McpToolError("invalid_samplerate", "samplerate_hz must be positive")
@@ -482,10 +518,13 @@ class PydsviewMcpTools:
             device.sample_count = int(samples)
         if duration_ms is not None:
             device.set_config(Config.LIMIT_MSEC, int(duration_ms))
-        if threshold_v is not None:
-            device.set_config(Config.VTH, float(threshold_v))
+        if trigger:
+            device.set_config(Config.RLE, False)
+            device.set_config(Config.LOOP_MODE, False)
         if channels is not None:
             self._configure_channels(device, channels)
+        if trigger:
+            self._apply_simple_trigger(trigger)
 
     def _configure_channels(self, device: Any, channels: list[int]) -> None:
         available = {int(channel.index) for channel in device.channels if getattr(channel, "is_logic", True)}
@@ -499,7 +538,7 @@ class PydsviewMcpTools:
     def _export_result(self, result: Any, path: Path, output_format: str) -> None:
         output_format = output_format.lower().lstrip(".")
         if output_format == "dsl":
-            export.Exporter.save_session(result, str(path))
+            export.Exporter.save_session(result, str(path), channel_indices=getattr(result, "channel_indices", None))
         elif output_format == "csv":
             export.Exporter.to_csv(result, str(path))
         elif output_format == "vcd":
@@ -516,6 +555,7 @@ class PydsviewMcpTools:
         completed_at: float,
         selected_device: Any,
         libsigrok4dsl_version: Optional[str] = None,
+        capture_result: Optional[Any] = None,
     ) -> Path:
         metadata_path = sidecar_path(path)
         payload = {
@@ -527,9 +567,28 @@ class PydsviewMcpTools:
             "completed_at": completed_at,
             "duration_s": completed_at - started_at,
             "device": active_device_item(selected_device),
+            "result": _capture_result_item(capture_result),
         }
         metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return metadata_path
+
+    def _apply_simple_trigger(self, trigger_request: dict[str, Any]) -> None:
+        trigger = TriggerConfig()
+        trigger.reset()
+        trigger.set_mode(TriggerMode.SIMPLE)
+        trigger.set_position(int(trigger_request["position_percent"]))
+        trigger.set_channel_trigger(int(trigger_request["channel"]), str(trigger_request["spec"]))
+        trigger.set_enabled(True)
+
+    def _run_triggered_capture(self, device: Any, *, timeout_s: float) -> Any:
+        session = device.start_capture()
+        started_at = time.time()
+        while not session.is_done():
+            if time.time() - started_at > timeout_s:
+                session.stop()
+                raise McpToolError("trigger_timeout", f"triggered capture timed out after {timeout_s:g} seconds")
+            time.sleep(0.05)
+        return session.wait(timeout=5.0)
 
     def _ensure_no_active_capture(self) -> None:
         if self._active_capture is not None:
@@ -563,6 +622,11 @@ class PydsviewMcpTools:
         output_format = str(profile.get("output_format", "dsl")).lower().lstrip(".")
         samples = profile.get("samples")
         duration_ms = profile.get("duration_ms")
+        trigger_request = _normalize_simple_trigger(
+            trigger_channel=profile.get("trigger_channel"),
+            trigger=profile.get("trigger"),
+            trigger_position_percent=profile.get("trigger_position_percent"),
+        )
         validate_capture_bounds(self.config, samples=samples, duration_ms=duration_ms)
         if output_format not in {"dsl", "csv", "vcd"}:
             raise McpToolError("unsupported_output_format", "profile output_format must be dsl, csv, or vcd")
@@ -574,8 +638,51 @@ class PydsviewMcpTools:
             "channels": profile.get("channels") or [],
             "threshold_v": profile.get("threshold_v"),
             "timeout_s": profile.get("timeout_s"),
+            "trigger_channel": trigger_request["channel"] if trigger_request else None,
+            "trigger": trigger_request["spec"] if trigger_request else None,
+            "trigger_position_percent": trigger_request["position_percent"] if trigger_request else None,
             "output_format": output_format,
         }
+
+
+def _normalize_simple_trigger(
+    *,
+    trigger_channel: Optional[int],
+    trigger: Optional[str],
+    trigger_position_percent: Optional[int],
+) -> Optional[dict[str, Any]]:
+    if trigger_channel is None and trigger is None and trigger_position_percent is None:
+        return None
+    if trigger_channel is None or trigger is None:
+        raise McpToolError("invalid_trigger", "triggered capture requires trigger_channel and trigger")
+    position = 50 if trigger_position_percent is None else int(trigger_position_percent)
+    if not 0 <= position <= 90:
+        raise McpToolError("invalid_trigger", "trigger_position_percent must be between 0 and 90")
+    spec = str(trigger).strip().upper()
+    if spec not in {"R", "F", "1", "0", "C"}:
+        raise McpToolError("invalid_trigger", "trigger must be one of R, F, 1, 0, or C")
+    return {
+        "channel": int(trigger_channel),
+        "spec": spec,
+        "position_percent": position,
+        "mode": "simple",
+    }
+
+
+def _capture_result_item(result: Optional[Any]) -> Optional[dict[str, Any]]:
+    if result is None:
+        return None
+    raw_data = getattr(result, "raw_data", None)
+    raw_bytes = len(raw_data) if raw_data is not None else None
+    channel_indices = getattr(result, "channel_indices", None)
+    return {
+        "samplerate_hz": getattr(result, "samplerate", None),
+        "sample_count": getattr(result, "sample_count", None),
+        "trigger_pos": getattr(result, "trigger_pos", None),
+        "raw_bytes": raw_bytes,
+        "channel_count": getattr(result, "channel_count", None),
+        "channel_indices": list(channel_indices) if channel_indices is not None else None,
+    }
 
 
 def _find_device_index(devices: list[Any], selector: str) -> Optional[int]:

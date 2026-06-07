@@ -190,6 +190,28 @@ Available tools:
 - `delete_capture_profile`
 - `capture_with_profile`
 
+`capture` and `start_capture` can configure a simple per-capture logic trigger
+directly. Pass `trigger_channel`, `trigger`, and optionally
+`trigger_position_percent`; `trigger` accepts `R`, `F`, `1`, `0`, or `C`.
+Triggered captures use the same stream-mode/RLE-off/loop-off setup that DSView
+uses for reliable trigger positioning.
+
+Example trigger-gated capture request:
+
+```json
+{
+  "device": "1",
+  "samplerate_hz": 1000000,
+  "samples": 1000000,
+  "channels": [0, 1],
+  "threshold_v": 1.0,
+  "trigger_channel": 1,
+  "trigger": "R",
+  "trigger_position_percent": 50,
+  "filename": "triggered.dsl"
+}
+```
+
 Safety defaults:
 
 - Captures must be bounded by sample count or duration.
@@ -197,7 +219,7 @@ Safety defaults:
 - Existing files are not overwritten unless overwrite is explicitly enabled.
 - One capture may run at a time in each server process.
 - Each exported capture writes a JSON sidecar with device, library, capture,
-  and timing metadata.
+  trigger request, result, and timing metadata.
 
 Environment variables:
 

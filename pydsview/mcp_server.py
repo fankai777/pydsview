@@ -66,6 +66,9 @@ def build_server(tools: Optional[PydsviewMcpTools] = None) -> Any:
         overwrite: bool = False,
         timeout_s: Optional[float] = None,
         threshold_v: Optional[float] = None,
+        trigger_channel: Optional[int] = None,
+        trigger: Optional[str] = None,
+        trigger_position_percent: Optional[int] = None,
     ) -> dict[str, Any]:
         return toolset.capture(
             device=device,
@@ -78,6 +81,9 @@ def build_server(tools: Optional[PydsviewMcpTools] = None) -> Any:
             overwrite=overwrite,
             timeout_s=timeout_s,
             threshold_v=threshold_v,
+            trigger_channel=trigger_channel,
+            trigger=trigger,
+            trigger_position_percent=trigger_position_percent,
         )
 
     @server.tool()
@@ -89,6 +95,9 @@ def build_server(tools: Optional[PydsviewMcpTools] = None) -> Any:
         channels: Optional[list[int]] = None,
         threshold_v: Optional[float] = None,
         timeout_s: Optional[float] = None,
+        trigger_channel: Optional[int] = None,
+        trigger: Optional[str] = None,
+        trigger_position_percent: Optional[int] = None,
     ) -> dict[str, Any]:
         return toolset.start_capture(
             device=device,
@@ -98,6 +107,9 @@ def build_server(tools: Optional[PydsviewMcpTools] = None) -> Any:
             channels=channels,
             threshold_v=threshold_v,
             timeout_s=timeout_s,
+            trigger_channel=trigger_channel,
+            trigger=trigger,
+            trigger_position_percent=trigger_position_percent,
         )
 
     @server.tool()

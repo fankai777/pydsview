@@ -75,6 +75,60 @@ class McpToolsTests(unittest.TestCase):
             self.assertEqual(payload["request"]["channels"], [0])
             self.assertEqual(payload["libsigrok4dsl_version"], "1.3.0")
 
+    def test_triggered_capture_uses_async_path_and_writes_metadata(self) -> None:
+        context = _FakeContext()
+        trigger = _FakeTriggerConfig()
+        with tempfile.TemporaryDirectory() as tempdir:
+            tools = PydsviewMcpTools(
+                config=McpServerConfig(artifact_dir=Path(tempdir)),
+                context_factory=lambda: context,
+            )
+            with _patched_exporters(), patch("pydsview.mcp_tools.TriggerConfig", return_value=trigger):
+                result = tools.capture(
+                    device="1",
+                    samplerate_hz=1_000_000,
+                    samples=64,
+                    channels=[0, 1],
+                    threshold_v=1.0,
+                    trigger_channel=1,
+                    trigger="R",
+                    trigger_position_percent=50,
+                    filename="triggered.dsl",
+                )
+
+            self.assertTrue(result["ok"])
+            device = context.device
+            self.assertEqual(device.configs["OPERATION_MODE"], 1)
+            self.assertEqual(device.configs["VTH"], 1.0)
+            self.assertEqual(device.configs["RLE"], False)
+            self.assertEqual(device.configs["LOOP_MODE"], False)
+            self.assertTrue(device.start_capture_called)
+            self.assertEqual(
+                device.config_calls,
+                [
+                    ("OPERATION_MODE", 1),
+                    ("VTH", 1.0),
+                    ("samplerate", 1_000_000),
+                    ("sample_count", 64),
+                    ("RLE", False),
+                    ("LOOP_MODE", False),
+                ],
+            )
+            self.assertEqual(
+                trigger.calls,
+                [
+                    ("reset",),
+                    ("mode", "SIMPLE"),
+                    ("position", 50),
+                    ("channel", 1, "R"),
+                    ("enabled", True),
+                ],
+            )
+            payload = json.loads(Path(result["artifact"]["metadata_path"]).read_text(encoding="utf-8"))
+            self.assertEqual(payload["request"]["trigger"], {"channel": 1, "mode": "simple", "position_percent": 50, "spec": "R"})
+            self.assertEqual(payload["result"]["trigger_pos"], 0)
+            self.assertEqual(payload["result"]["channel_indices"], [0, 1])
+
     def test_capture_rejects_unbounded_and_unsafe_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             tools = PydsviewMcpTools(
@@ -195,23 +249,45 @@ class _FakeDevice:
         self.device_type = types.SimpleNamespace(name="USB")
         self.handle = 0x2000
         self.mode = types.SimpleNamespace(name="LOGIC")
-        self.samplerate = 0
-        self.sample_count = 0
+        self._samplerate = 0
+        self._sample_count = 0
         self.channels = [_FakeChannel(0, "D0"), _FakeChannel(1, "D1")]
         self.enabled: dict[int, bool] = {}
         self.configs: dict[str, object] = {}
+        self.config_calls: list[tuple[str, object]] = []
+        self.start_capture_called = False
+
+    @property
+    def samplerate(self) -> int:
+        return self._samplerate
+
+    @samplerate.setter
+    def samplerate(self, value: int) -> None:
+        self._samplerate = value
+        self.config_calls.append(("samplerate", value))
+
+    @property
+    def sample_count(self) -> int:
+        return self._sample_count
+
+    @sample_count.setter
+    def sample_count(self, value: int) -> None:
+        self._sample_count = value
+        self.config_calls.append(("sample_count", value))
 
     def set_config(self, key, value) -> None:
         key_name = getattr(key, "name", str(key))
         self.configs[key_name] = value
+        self.config_calls.append((key_name, value))
 
     def enable_channel(self, index: int, enabled: bool) -> None:
         self.enabled[index] = enabled
 
     def capture(self, timeout=None):
-        return types.SimpleNamespace(result=True, timeout=timeout)
+        return _FakeCaptureResult(timeout=timeout)
 
     def start_capture(self):
+        self.start_capture_called = True
         return _FakeSession()
 
 
@@ -223,7 +299,7 @@ class _FakeSession:
         return True
 
     def wait(self, timeout=None):
-        return types.SimpleNamespace(result=True, timeout=timeout)
+        return _FakeCaptureResult(timeout=timeout)
 
     def stop(self) -> None:
         self.stopped = True
@@ -275,7 +351,10 @@ class _FakeFastMCP:
 class _patched_exporters:
     def __enter__(self):
         self.patchers = [
-            patch("pydsview.mcp_tools.export.Exporter.save_session", lambda result, path: Path(path).write_text("dsl", encoding="utf-8")),
+            patch(
+                "pydsview.mcp_tools.export.Exporter.save_session",
+                lambda result, path, **kwargs: Path(path).write_text("dsl", encoding="utf-8"),
+            ),
             patch("pydsview.mcp_tools.export.Exporter.to_csv", lambda result, path: Path(path).write_text("csv", encoding="utf-8")),
             patch("pydsview.mcp_tools.export.Exporter.to_vcd", lambda result, path: Path(path).write_text("vcd", encoding="utf-8")),
         ]
@@ -286,6 +365,37 @@ class _patched_exporters:
     def __exit__(self, *exc) -> None:
         for patcher in reversed(self.patchers):
             patcher.stop()
+
+class _FakeCaptureResult:
+    def __init__(self, timeout=None) -> None:
+        self.result = True
+        self.timeout = timeout
+        self.samplerate = 1_000_000
+        self.sample_count = 64
+        self.trigger_pos = 0
+        self.raw_data = bytearray(b"abc")
+        self.channel_count = 2
+        self.channel_indices = [0, 1]
+
+
+class _FakeTriggerConfig:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+    def reset(self) -> None:
+        self.calls.append(("reset",))
+
+    def set_mode(self, mode) -> None:
+        self.calls.append(("mode", getattr(mode, "name", str(mode))))
+
+    def set_position(self, position: int) -> None:
+        self.calls.append(("position", position))
+
+    def set_channel_trigger(self, channel: int, spec: str) -> None:
+        self.calls.append(("channel", channel, spec))
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.calls.append(("enabled", enabled))
 
 
 if __name__ == "__main__":
