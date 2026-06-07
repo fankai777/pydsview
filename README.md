@@ -27,6 +27,8 @@ pip install pydsview
 - NumPy array output
 - Export to CSV (with compressed mode), VCD, and DSView session (`.dsl`) format
 - Prebuilt Windows DLLs and firmware included — plug and play
+- Optional Model Context Protocol (MCP) server for local agent-controlled
+  discovery, bounded capture, export, and profile workflows
 
 ### Architecture
 
@@ -143,6 +145,68 @@ Wraps the currently active device.
 - `Exporter.to_vcd(result, path, channels=None, timescale="1ns")`
 - `Exporter.save_session(result, path)`
 
+### MCP Server
+
+Install the optional MCP dependency:
+
+```bash
+pip install "pydsview[mcp]"
+```
+
+Run the local stdio server:
+
+```bash
+pydsview-mcp --artifact-dir ./captures --max-samples 10000000 --max-duration-ms 10000
+```
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "pydsview": {
+      "command": "pydsview-mcp",
+      "args": ["--artifact-dir", "./captures"]
+    }
+  }
+}
+```
+
+Available tools:
+
+- `get_library_status`
+- `list_devices`
+- `get_device_info`
+- `configure_device`
+- `capture`
+- `start_capture`
+- `capture_status`
+- `stop_capture`
+- `export_capture`
+- `load_session_file`
+- `set_trigger`
+- `save_capture_profile`
+- `list_capture_profiles`
+- `delete_capture_profile`
+- `capture_with_profile`
+
+Safety defaults:
+
+- Captures must be bounded by sample count or duration.
+- Output artifacts are restricted to the configured artifact directory.
+- Existing files are not overwritten unless overwrite is explicitly enabled.
+- One capture may run at a time in each server process.
+- Each exported capture writes a JSON sidecar with device, library, capture,
+  and timing metadata.
+
+Environment variables:
+
+- `PYDSVIEW_MCP_ARTIFACT_DIR`
+- `PYDSVIEW_MCP_MAX_SAMPLES`
+- `PYDSVIEW_MCP_MAX_DURATION_MS`
+- `PYDSVIEW_MCP_ALLOW_OVERWRITE`
+- `PYDSVIEW_MCP_DEFAULT_TIMEOUT_S`
+
 ### Windows Source Patches
 
 To build `libsigrok4DSL` on Windows (without the Qt GUI event loop), two files in `DSView/libsigrok4DSL/hardware/DSL/` require patching:
@@ -163,10 +227,12 @@ To build `libsigrok4DSL` on Windows (without the Qt GUI event loop), two files i
 ### Running Tests
 
 ```bash
+pip install -e ".[dev,mcp]"
 pytest tests/
 ```
 
 `test_export.py` works without hardware. `test_context.py`, `test_device.py`, and `test_capture.py` require the compiled library and use the Demo device.
+`test_mcp_tools.py` uses fake devices and does not require analyzer hardware.
 
 ### License
 
