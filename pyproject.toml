@@ -30,7 +30,11 @@ dependencies = [
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.5"]
+mcp = ["mcp>=1.27,<2; python_version >= '3.10'"]
 dev = ["pytest>=7.0", "matplotlib>=3.5"]
+
+[project.scripts]
+pydsview-mcp = "pydsview.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["pydsview*"]
